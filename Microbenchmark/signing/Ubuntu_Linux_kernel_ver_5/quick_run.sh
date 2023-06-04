@@ -1,27 +1,27 @@
 #!/bin/bash
 
 sudo dmesg --clear
-sudo insmod quickmod.ko len=64
-dmesg
-sudo rmmod quickmod
+sudo insmod quick512.ko len=64
+sudo dmesg
+sudo rmmod quick512
 
 
 sudo dmesg --clear
-sudo insmod quickmod.ko  len=128
-dmesg
-sudo rmmod quickmod
+sudo insmod quick512.ko  len=128
+sudo dmesg
+sudo rmmod quick512
 
 sudo dmesg --clear
-sudo insmod quickmod.ko  
-dmesg
-sudo rmmod quickmod
+sudo insmod quick512.ko  
+sudo dmesg
+sudo rmmod quick512
 
 sudo dmesg --clear
-sudo insmod quickmod.ko  len=320
-dmesg
-sudo rmmod quickmod
+sudo insmod quick512.ko  len=320
+sudo dmesg
+sudo rmmod quick512
 
 sudo dmesg --clear
-sudo insmod quickmod.ko  len=384
-dmesg
-sudo rmmod quickmod
+sudo insmod quick512.ko  len=384
+sudo dmesg
+sudo rmmod quick512

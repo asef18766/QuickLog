@@ -1,11 +1,4 @@
-obj-m += quickmod.o
-
-KERNELDIR ?= /lib/modules/$(shell uname -r)/build
-PWD := $(shell pwd)
-ccflags-y := -std=gnu99 -Wno-declaration-after-statement -mmmx -mavx -maes -mpreferred-stack-boundary=4
-
-
 all:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD)
+	gcc main.c -mmmx -mavx -maes -g -mavx512f -march=native -o main
 clean:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	rm main

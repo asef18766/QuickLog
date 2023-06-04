@@ -1,0 +1,1 @@
+sudo trace-cmd record -p function_graph -F insmod quick512.ko len=64
