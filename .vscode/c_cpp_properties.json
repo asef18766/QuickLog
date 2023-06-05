@@ -10,6 +10,7 @@
                 "/usr/src/linux-headers-5.15.0-72-generic/arch/x86/include/generated/",
                 "/usr/src/linux-headers-5.15.0-72/include",
                 "/usr/src/linux-headers-5.15.0-72-generic/include",
+                "/usr/lib/gcc/x86_64-linux-gnu/11/include"
             ],
             "defines": [
                 "__KERNEL__",

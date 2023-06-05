@@ -48,6 +48,41 @@
 	}while (0)
 
 
+//AES Pre-round 4 blocks
+#define prernd_4(cipher_blks,sign_keys) 			       \
+  do{                                                      \
+    cipher_blks[0] = xor_block(cipher_blks[0], sign_keys); \
+    cipher_blks[1] = xor_block(cipher_blks[1], sign_keys); \
+    cipher_blks[2] = xor_block(cipher_blks[2], sign_keys); \
+    cipher_blks[3] = xor_block(cipher_blks[3], sign_keys); \
+  } while(0)
+
+#define enc_4(cipher_blks, key)                                 \
+	do{                                                         \
+		cipher_blks[0] = _mm_aesenc_si128(cipher_blks[0], key); \
+		cipher_blks[1] = _mm_aesenc_si128(cipher_blks[1], key); \
+		cipher_blks[2] = _mm_aesenc_si128(cipher_blks[2], key); \
+		cipher_blks[3] = _mm_aesenc_si128(cipher_blks[3], key); \
+  	}while(0)
+
+#define AES_ECB_4(cipher_blks, sched, sign_keys)   \
+	do{                                        	   \
+		prernd_4(cipher_blks,sign_keys);           \
+		enc_4(cipher_blks, sched[1]);              \
+		enc_4(cipher_blks, sched[2]);              \
+		enc_4(cipher_blks, sched[3]);              \
+		enc_4(cipher_blks, sched[4]);              \
+		enc_4(cipher_blks, sched[5]);              \
+		enc_4(cipher_blks, sched[6]);              \
+		enc_4(cipher_blks, sched[7]);              \
+		enc_4(cipher_blks, sched[8]);              \
+		enc_4(cipher_blks, sched[9]);              \
+		cipher_blks[0] =_mm_aesenclast_si128(cipher_blks[0], sched[10]); \
+		cipher_blks[1] =_mm_aesenclast_si128(cipher_blks[1], sched[10]); \
+		cipher_blks[2] =_mm_aesenclast_si128(cipher_blks[2], sched[10]); \
+		cipher_blks[3] =_mm_aesenclast_si128(cipher_blks[3], sched[10]); \
+	}while (0)
+
 typedef __m128i block;
 #include <stdlib.h>
 #include  <stdio.h>
@@ -94,7 +129,7 @@ int main()
     printhex((uint8_t*)sched, sizeof(sched));
     puts("");
 
-	AES_ECB_8(cipher_blks, sched, mask);
+	AES_ECB_4(cipher_blks, sched, mask);
 	puts("res:");
     printhex((uint8_t*)cipher_blks, sizeof(cipher_blks));
     puts("");
@@ -116,7 +151,7 @@ int main()
     printhex((uint8_t*)sched, sizeof(sched));
     puts("");
 
-	AES_ECB_8_(cipher_blks, sched, mask);
+	AES_ECB_4_(cipher_blks, sched, mask);
 	puts("res:");
     printhex((uint8_t*)cipher_blks, sizeof(cipher_blks));
     puts("");

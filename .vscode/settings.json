@@ -9,6 +9,12 @@
         "api.h": "c",
         "sched.h": "c",
         "limits.h": "c",
-        "compiler.h": "c"
+        "compiler.h": "c",
+        "x86intrin.h": "c",
+        "immintrin.h": "c",
+        "mm3dnow.h": "c",
+        "avx512ifmaintrin.h": "c",
+        "stdlib.h": "c",
+        "stdio.h": "c"
     }
 }
