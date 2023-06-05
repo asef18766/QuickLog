@@ -2,6 +2,7 @@
 #define  _MM_MALLOC_H_INCLUDED
 #include <x86intrin.h>
 #undef _MM_MALLOC_H_INCLUDED
+
 #define enc_8_(cipher_blks, key)                                   \
 	do{                                                            \
 		__m512i dkey = _mm512_broadcast_i32x4(key);		     	   \
@@ -12,6 +13,19 @@
 #define enc_4_(cipher_blks, key)                                 \
 	do{                                                         \
 		*((__m512i*)cipher_blks)     = _mm512_aesenc_epi128(*((__m512i*)cipher_blks)    , _mm512_broadcast_i32x4(key));   \
+  	}while(0)
+
+#define enc_3_(cipher_blks, key)                                 \
+	do{                                                         \
+		cipher_blks[0] = _mm_aesenc_si128(cipher_blks[0], key); \
+		cipher_blks[1] = _mm_aesenc_si128(cipher_blks[1], key); \
+		cipher_blks[2] = _mm_aesenc_si128(cipher_blks[2], key); \
+  	}while(0)
+
+#define enc_2_(cipher_blks, key)                                 \
+	do{                                                         \
+		cipher_blks[0] = _mm_aesenc_si128(cipher_blks[0], key); \
+		cipher_blks[1] = _mm_aesenc_si128(cipher_blks[1], key); \
   	}while(0)
 
 #define prernd_8_(cipher_blks, key)                       \
