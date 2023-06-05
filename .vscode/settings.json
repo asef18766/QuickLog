@@ -1,3 +1,14 @@
 {
-    "makefile.extensionOutputFolder": "./.vscode"
+    "files.associations": {
+        "kernel.h": "c",
+        "module.h": "c",
+        "audit.h": "c",
+        "types.h": "c",
+        "stddef.h": "c",
+        "delay.h": "c",
+        "api.h": "c",
+        "sched.h": "c",
+        "limits.h": "c",
+        "compiler.h": "c"
+    }
 }
