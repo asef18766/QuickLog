@@ -11,6 +11,7 @@
 #include <immintrin.h>
 #include <emmintrin.h>   
 #include <wmmintrin.h>
+#include "quick512_utils.h"
 /* Define standard sized integers  */
 #if defined(_MSC_VER) && (_MSC_VER < 1600)
 	typedef unsigned __int8  uint8_t;
@@ -246,6 +247,22 @@ static void cmpt_4_blks(block *cipher_blks, uint16_t counter, const char *log_ms
 }
 
 
+
+static void cmpt_4_blks_(block *cipher_blks, uint16_t counter, const char *log_msg, block *sched, block sign_keys)
+{
+
+	if(counter){//Not the first block		
+		cipher_blks[0]  = gen_logging_blk((block*)(log_msg),counter+1); 
+	}else{//contains the first block
+		cipher_blks[0]  = _mm_srli_si128(_mm_loadu_si128((block*)log_msg), 2);
+		cipher_blks[0]  = _mm_insert_epi16(cipher_blks[0], counter+1, 0);
+	}
+	cipher_blks[1]  = gen_logging_blk((block*)(log_msg+12),counter+2); 
+	cipher_blks[2]  = gen_logging_blk((block*)(log_msg+26),counter+3); 
+	cipher_blks[3]  = gen_logging_blk((block*)(log_msg+40),counter+4); 
+	AES_ECB_4_(cipher_blks,sched, sign_keys);
+}
+
 //*********************** end of help functions *************************************
 
 /*Updating a key-sate pair using the current_state */
@@ -458,7 +475,105 @@ uint64_t verify_core( const unsigned char *log_msg, const int *len,  const block
 	return out.u64[0];
 }
 
+/**  
+* Input @log_msg: a log data, 
+        @len: the lenght of input data,
+		@current_key: the signing key
+* Computing block format: a block(16 bytes) contains "<i>||M_i",  
+*                         2 bytes counter(<i>) and 14 bytes log data(M_i)
+* Output: a proof, out(uint64_t)
+**/
+uint64_t verify_core512( const unsigned char *log_msg, const int *len,  const block *current_key)
+{
+	uint16_t remaining, counter;
+	size_t msg_len = *len;
+	//tmp: used for padding the last block
+	union { uint16_t u16[8]; uint8_t u8[16]; block bl; } tmp;
+	register block * sched =((block *)(const_aeskey.rd_key)); //point to AES round keys	;
+	block mask, cipher_blks[8], tag_blks[3];
+	union { uint64_t u64[2]; block bl; } out;
 
+	//int nblks;
+	//nblks = (msg_len/112); 
+	remaining=(uint16_t)(*len);
+	counter =0;
+	
+ 
+	mask =_mm_xor_si128(sched[0], *current_key);//xor the signing key with the aes public key
+	tag_blks[2] = _mm_loadu_si128(current_key);
+
+	if(remaining>=112)//start 8 blocks parallel computing 
+	{
+		cipher_blks[0]  = _mm_srli_si128(_mm_loadu_si128((block*)log_msg), 2); 
+		cipher_blks[0]  = _mm_insert_epi16(cipher_blks[0], counter+1, 0);
+		gen_7_blks(cipher_blks,log_msg,counter);
+		AES_ECB_8_(cipher_blks,sched, mask);
+		tag_8_xor_(tag_blks,cipher_blks);
+		counter +=8;
+		log_msg +=110;	
+		remaining -=112;
+		while(remaining>=112){	
+			cipher_blks[0]  = gen_logging_blk((block*)log_msg, counter+1); 
+			gen_7_blks(cipher_blks,log_msg,counter);
+			AES_ECB_8_(cipher_blks,sched, mask);
+			tag_blks_xor_8(tag_blks,cipher_blks);
+			counter +=8;
+			log_msg +=110;
+			remaining -=112;
+		}
+	}//end of nblks
+
+	if(remaining >=56){//4-block, 4*14=56 bytes log data
+		cmpt_4_blks_(cipher_blks,counter, log_msg, sched, mask);
+		tag_blks[0] = xor_block( xor_block(cipher_blks[0], cipher_blks[1]), xor_block(cipher_blks[2], cipher_blks[3]));  
+		tag_blks[2] = xor_block(tag_blks[2], tag_blks[0]);
+		remaining -= 56;
+		counter +=4;
+		log_msg +=54;/*56-byte computed, apply 54-byte, leaving 2-byte overwrote by counter*/
+	}
+	if (remaining >= 28) {//2-block, 2*14=28 bytes log data
+		if(counter){ 
+			cipher_blks[0]  = gen_logging_blk((block*)(log_msg),counter+1); //Not the first block
+		}else{//contains the first block
+			cipher_blks[0]  = _mm_srli_si128(_mm_loadu_si128((block*)log_msg), 2);
+			cipher_blks[0]  = _mm_insert_epi16(cipher_blks[0], counter+1, 0);
+		}
+		cipher_blks[1]  = gen_logging_blk((block*)(log_msg+12),counter+2); 
+		AES_ECB_2(cipher_blks,sched, mask);
+		tag_blks[2] = xor_block(xor_block(cipher_blks[0], cipher_blks[1]), tag_blks[2]); 
+		remaining -= 28;
+		counter +=2;
+		log_msg +=26;/*28-byte computed, apply 26-byte, leaving 2-byte overwrote by counter*/
+	}
+	if (remaining >= 14) {//1-block 14 bytes log data
+		if(counter){
+			tmp.bl = _mm_loadu_si128((block*)log_msg);//Not the first block
+		}else{//it is the first block
+			tmp.bl = _mm_srli_si128(_mm_loadu_si128((block*)log_msg), 2);//the first block
+		}
+		tmp.bl = _mm_insert_epi16(tmp.bl, counter+1, 0);
+		aes_single(cipher_blks, sched,mask);
+		tag_blks[2] = xor_block(tag_blks[2], tmp.bl);
+		remaining -= 14;
+		counter +=1;
+		log_msg +=12;/*14-byte computed, apply 12-byte, leaving 2-byte overwrote by counter*/
+	}
+	if (remaining){//last block + generating new key
+		if (counter)  log_msg +=2;
+		counter +=(14-remaining);
+		tmp.bl = zero_block();
+		tmp.u16[0]= counter;
+		while(remaining--){
+			tmp.u8[remaining+1]=log_msg[remaining-1];
+		}
+		tmp.bl = xor_block(tmp.bl, mask);
+		aes_single(cipher_blks, sched, mask);
+		tag_blks[2] = xor_block(tag_blks[2], tmp.bl);	
+	}
+    
+	out.bl = _mm_loadu_si128((block*)&tag_blks[2]);
+	return out.u64[0];
+}
 
 /** Initial:
 *** Expand AES round keys
@@ -579,14 +694,14 @@ int main(int argc, char* argv[]){
 			my_update(&current_pair[14], &current_pair[12],sched_key);
 
 			/*Computing 8 messages*/
-			vtag[0]=verify_core((unsigned char*)str, &len, &current_pair[1]);
-			vtag[1]=verify_core((unsigned char*)str1, &len, &current_pair[3]);
-			vtag[2]=verify_core((unsigned char*)str2, &len, &current_pair[5]);
-			vtag[3]=verify_core((unsigned char*)str3, &len, &current_pair[7]);
-			vtag[4]=verify_core((unsigned char*)str4, &len, &current_pair[9]);
-			vtag[5]=verify_core((unsigned char*)str5, &len, &current_pair[11]);
-			vtag[6]=verify_core((unsigned char*)str6, &len, &current_pair[13]);
-			vtag[7]=verify_core((unsigned char*)str7, &len, &current_pair[15]);
+			vtag[0]=verify_core512((unsigned char*)str, &len, &current_pair[1]);
+			vtag[1]=verify_core512((unsigned char*)str1, &len, &current_pair[3]);
+			vtag[2]=verify_core512((unsigned char*)str2, &len, &current_pair[5]);
+			vtag[3]=verify_core512((unsigned char*)str3, &len, &current_pair[7]);
+			vtag[4]=verify_core512((unsigned char*)str4, &len, &current_pair[9]);
+			vtag[5]=verify_core512((unsigned char*)str5, &len, &current_pair[11]);
+			vtag[6]=verify_core512((unsigned char*)str6, &len, &current_pair[13]);
+			vtag[7]=verify_core512((unsigned char*)str7, &len, &current_pair[15]);
 
 			for(k=0;k<8;k++){
 				if(vtag[k]!=stag[k])printf("tag verfication fail!\n");break;
