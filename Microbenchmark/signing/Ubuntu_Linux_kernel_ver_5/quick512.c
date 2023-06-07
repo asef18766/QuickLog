@@ -26,7 +26,7 @@
 #include <linux/stddef.h>
 #include <linux/audit.h>
 #include <linux/lsm_audit.h>
-
+#include "quick512_utils.h"
 
 static int len= 256; //generating size
 module_param(len,int,S_IRUGO);  
@@ -283,6 +283,19 @@ static void cmpt_4_blks(block *cipher_blks, uint16_t counter, const char *log_ms
 	AES_ECB_4(cipher_blks, sched, sign_keys);
 }
 
+static void cmpt_4_blks_(block *cipher_blks, uint16_t counter, const char *log_msg, const block *sched, block sign_keys)
+{
+	if(counter){		
+		cipher_blks[0]  = gen_logging_blk((block*)(log_msg),counter+1); 
+	}else{//contains the first block
+		cipher_blks[0]  = _mm_srli_si128(_mm_loadu_si128((block*)log_msg), 2);
+		cipher_blks[0]  = _mm_insert_epi16(cipher_blks[0], counter+1, 0);
+	}
+	cipher_blks[1]  = gen_logging_blk((block*)(log_msg+12),(counter+2)); 
+	cipher_blks[2]  = gen_logging_blk((block*)(log_msg+26),(counter+3)); 
+	cipher_blks[3]  = gen_logging_blk((block*)(log_msg+40),(counter+4)); 
+	AES_ECB_4_(cipher_blks, sched, sign_keys);
+}
 
 static void cmpt_2_blks(block *cipher_blks, uint16_t counter, const char *log_msg, const block *sched, block sign_keys)
 {
@@ -437,8 +450,104 @@ static __u64 mac_core( const char *log_msg, const int msg_len)
 	return (out_tmp[0]);
 }
 
+/**  
+* MAC, signing a log message and updating the signing-key & state
+* Input @log_msg: a log data,  
+        @msg_len: the length of the log data 
+* Computing block format: a block(16 bytes) contains "<i>||M_i",  
+*                         2 bytes counter(<i>) and 14 bytes log data(M_i)
+* Output: T(64-byte tag)
+**/ 
+static __u64 mac_core512( const char *log_msg, const int msg_len)
+{
+	block mask, cipher_blks[8], tag_blks[3];
+	unsigned char my_pad[16];
+	__u64 out_tmp[2];
+	register block * sched = ((block *)(const_aeskey.rd_key)); 
+	register block * aes_blks = cipher_blks;
+	block *pad_zeros;
+	uint16_t remaining, counter, *pad_header;
+	
+	remaining = (uint16_t)msg_len;
+	counter =0;
+	pad_header = ((uint16_t*)(my_pad));	
+	pad_zeros = ((block *)(my_pad));
 
+	
+	mask = _mm_xor_si128(sched[0], current_key);//xor the signing key with the aes public key
+	tag_blks[2] = _mm_loadu_si128(&current_key);
 
+	if(remaining>=112)//start 8 blocks parallel computing 
+	{
+		cipher_blks[0]  = _mm_srli_si128(_mm_loadu_si128((block*)log_msg), 2); 
+		cipher_blks[0]  = _mm_insert_epi16(cipher_blks[0], counter+1, 0);
+		gen_7_blks(cipher_blks,log_msg,counter);
+		AES_ECB_8_(cipher_blks,sched, mask);
+		tag_8_xor_(tag_blks,cipher_blks);
+		counter +=8;
+		log_msg +=110;/*112-byte computed, apply 110-byte, leaving 2-byte overwrote by counter*/	
+		remaining -= 112;
+		while(remaining >= 112){	
+			cipher_blks[0]  = gen_logging_blk((block*)log_msg, counter+1); 
+			gen_7_blks(cipher_blks,log_msg,counter);
+			AES_ECB_8_(cipher_blks,sched, mask);
+			tag_8_xor_(tag_blks,cipher_blks);/*)Xor each block*/
+			counter += 8;
+			log_msg += 110;
+			remaining -= 112;
+		}
+	}//end of nblks
+	
+	if(remaining >=56){//4-block, 4*14=56 bytes log data
+		cmpt_4_blks_(aes_blks,counter, log_msg, sched, mask);
+		tag_blks[0] = xor_block( xor_block(cipher_blks[0], cipher_blks[1]), xor_block(cipher_blks[2], cipher_blks[3]));  
+		tag_blks[2] = xor_block(tag_blks[2], tag_blks[0]);
+		remaining -= 56;
+		counter +=4;
+		log_msg +=54;/*56-byte computed, apply 54-byte, leaving 2-byte overwrote by counter*/
+	}
+	if (remaining >= 28) {//2-block, 2*14=28 bytes log data
+		cmpt_2_blks(aes_blks, counter, log_msg, sched, mask);
+		//AES_ECB_2(aes_blks,sched);
+		tag_blks[2] = xor_block(xor_block(cipher_blks[0], cipher_blks[1]), tag_blks[2]); 
+		remaining -= 28;
+		counter +=2;
+		log_msg +=26;/*28-byte computed, apply 26-byte, leaving 2-byte overwrote by counter*/
+	}
+	if (remaining >= 14) {//1-block 14 bytes log data
+		cmpt_a_blk(&aes_blks[0],counter, log_msg, sched, mask);
+		tag_blks[2] = xor_block(tag_blks[2], cipher_blks[0]);
+		remaining -= 14;
+		counter +=1;
+		log_msg +=12;/*14-byte computed, apply 12-byte, leaving 2-byte overwrote by counter*/
+	}
+#if 1
+	if (remaining){//last block + generating new key
+		if (counter)  log_msg +=2;
+		counter += (14-remaining);
+		* pad_zeros = zero_block();
+		* pad_header = counter;
+		memcpy(&my_pad[2], log_msg, remaining);
+		cipher_blks[0] = xor_block( mask, *(block*)my_pad);
+		cipher_blks[1] = xor_block(current_state, sched[0]);
+		cipher_blks[2] = xor_block(cipher_blks[1], _mm_setr_epi32(0x0001, 0x0000, 0x0000, 0x0000));
+		AES_ECB_3(cipher_blks, sched);
+		tag_blks[2] = xor_block(cipher_blks[0], tag_blks[2]);
+		current_key = xor_block(cipher_blks[2], current_state);
+		current_state = xor_block(cipher_blks[1], current_state);
+	}else{
+		//pr_info("no remaining!\n");
+		cipher_blks[0] = xor_block(current_state, sched[0]);/*0 for updatting state*/
+		cipher_blks[1] = xor_block(cipher_blks[0], _mm_setr_epi32(0x0001, 0x0000, 0x0000, 0x0000));/*1 for updatting key*/
+		AES_ECB_2(cipher_blks, sched);
+		current_key = xor_block(cipher_blks[1], current_state);
+		current_state = xor_block(cipher_blks[0], current_state);
+	}
+#endif
+	_mm_store_si128((block*)out_tmp, tag_blks[2]);
+
+	return (out_tmp[0]);
+}
 
 
 
@@ -620,8 +729,10 @@ static int __init benchmarking(void)
 	
 	int i, j;
 	char *str; 
-	unsigned long long  start_time, end_time, appd_med, kenny_med[10], quick_med[10], quick_2_med[10];
-	unsigned long long  mean, q_sd, q2_sd, k_sd, sd_sum, sum;
+	unsigned long long  start_time, end_time, appd_med, kenny_med[10], quick_med[10], quick_2_med[10], quick_512_med[10];
+	unsigned long long  mean, q_sd, q2_sd, q512_sd, k_sd, sd_sum, sum;
+	unsigned long long  q_mean, q2_mean, q512_mean, k_mean;
+	
 	__u64  quick_tag, kenny_tag;
 	size_t key_len;
 	siphash_key_t first_key;
@@ -669,6 +780,7 @@ static int __init benchmarking(void)
 	mean = (sum/10);
 	sd_sum =0;
 	for(i=0;i<10;i++) sd_sum +=(quick_med[i]-mean)*(quick_med[i]-mean);
+	q_mean = mean;
 	q_sd = sd_sum/10;
 	q_sd = int_sqrt(q_sd);
 
@@ -704,12 +816,50 @@ static int __init benchmarking(void)
 	mean = (sum/10);
 	sd_sum =0;
 	for(i=0;i<10;i++) sd_sum +=(quick_2_med[i]-mean)*(quick_2_med[i]-mean);
+	q2_mean = mean;
 	q2_sd = sd_sum/10;
 	q2_sd = int_sqrt(q2_sd);
 
 	
 
 	msleep(100);
+
+/*************************************QuickLog512*************************************************/
+	for(i=0;i<10;i++){
+		for(j=0;j<iteration;j++)
+		{	
+
+			start_time = ktime_get_ns();
+
+			kernel_fpu_begin();
+			mac_core512(str, len);
+			kernel_fpu_end();
+			
+			end_time = ktime_get_ns();
+			
+			my_time[j] = end_time - start_time;
+			
+		}
+		
+		quick_512_med[i] =  median(iteration,  my_time);  
+
+		msleep(100);
+	}
+
+
+	sum =0;
+	for(i=0;i<10;i++) sum +=quick_512_med[i];
+	mean = (sum/10);
+	sd_sum =0;
+	for(i=0;i<10;i++) sd_sum +=(quick_512_med[i]-mean)*(quick_512_med[i]-mean);
+	q512_sd = sd_sum/10;
+	q512_mean = mean;
+	q512_sd = int_sqrt(q512_sd);
+
+	
+
+	msleep(100);
+ 
 /*************************************Kennylogging *********************************/
 	
 	//Kennylogging signing a message
@@ -734,6 +884,7 @@ static int __init benchmarking(void)
 	mean = (sum/10);
 	sd_sum =0;
 	for(i=0;i<10;i++) sd_sum +=(kenny_med[i]-mean)*(kenny_med[i]-mean);
+	k_mean = mean;
 	k_sd = sd_sum/10;
 	k_sd = int_sqrt(k_sd);
 
@@ -773,11 +924,15 @@ static int __init benchmarking(void)
 	appd_med = median(1000,  my_time);
 	kenny_med[0] +=  appd_med;  
 	quick_med[0] +=  appd_med;
+	quick_512_med[0] += appd_med;
 
-
-	pr_info("-[QuickLog Sign]-: median time =%llu ns, standard deviation = %llu\n", quick_med[0], q_sd);
-	pr_info("--[QuickLog2 Sign]--: median time =%llu ns, standard deviation = %llu\n", quick_2_med[0], q2_sd);
-	pr_info("(KennyLoggings Sign): median time =%llu ns, standard deviation = %llu\n", kenny_med[0], k_sd);
+	q_mean += appd_med;
+	q512_mean += appd_med;
+	k_mean += appd_med;
+	pr_info("-[QuickLog Sign]-: median time =%llu ns, standard deviation = %llu, mean = %llu\n", quick_med[0], q_sd, q_mean);
+	pr_info("--[QuickLog2 Sign]--: median time =%llu ns, standard deviation = %llu, mean = %llu\n", quick_2_med[0], q2_sd, q2_mean);
+	pr_info("--[QuickLog512 Sign]--: median time =%llu ns, standard deviation = %llu, mean = %llu\n", quick_512_med[0], q512_sd, q512_mean);
+	pr_info("(KennyLoggings Sign): median time =%llu ns, standard deviation = %llu, mean = %llu\n", kenny_med[0], k_sd, k_mean);
 
 	pr_info("\n-----------------------------------------------------------\n");
 	msleep(20000);

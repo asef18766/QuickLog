@@ -1,4 +1,11 @@
+obj-m += quick512.o
+
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+PWD := $(shell pwd)
+ccflags-y := -std=gnu99 -Wno-declaration-after-statement -mmmx -mavx -maes -mavx512f -march=native
+
+
 all:
-	gcc main.c -mmmx -mavx -maes -g -mavx512f -march=native -o main
+	$(MAKE) -C $(KERNELDIR) M=$(PWD)
 clean:
-	rm main
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean

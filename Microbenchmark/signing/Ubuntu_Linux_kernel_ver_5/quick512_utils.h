@@ -3,30 +3,6 @@
 #include <x86intrin.h>
 #undef _MM_MALLOC_H_INCLUDED
 
-#define enc_8_(cipher_blks, key)                                   \
-	do{                                                            \
-		__m512i dkey = _mm512_broadcast_i32x4(key);		     	   \
-		*((__m512i*)cipher_blks)     = _mm512_aesenc_epi128(*((__m512i*)cipher_blks)    , dkey);   \
-		*(((__m512i*)cipher_blks)+1) = _mm512_aesenc_epi128(*(((__m512i*)cipher_blks)+1), dkey);   \
-  	}while(0)
-
-#define enc_4_(cipher_blks, key)                                 \
-	do{                                                         \
-		*((__m512i*)cipher_blks)     = _mm512_aesenc_epi128(*((__m512i*)cipher_blks)    , _mm512_broadcast_i32x4(key));   \
-  	}while(0)
-
-#define enc_3_(cipher_blks, key)                                 \
-	do{                                                         \
-		cipher_blks[0] = _mm_aesenc_si128(cipher_blks[0], key); \
-		cipher_blks[1] = _mm_aesenc_si128(cipher_blks[1], key); \
-		cipher_blks[2] = _mm_aesenc_si128(cipher_blks[2], key); \
-  	}while(0)
-
-#define enc_2_(cipher_blks, key)                                 \
-	do{                                                         \
-		cipher_blks[0] = _mm_aesenc_si128(cipher_blks[0], key); \
-		cipher_blks[1] = _mm_aesenc_si128(cipher_blks[1], key); \
-  	}while(0)
 
 #define prernd_8_(cipher_blks, key)                       \
 	do{                                                  \
@@ -39,6 +15,25 @@
 	do{                                                  \
 		*((__m512i*)cipher_blks)     = _mm512_xor_si512(*((__m512i*)cipher_blks)    , _mm512_broadcast_i32x4(key));   \
 	} while(0)
+
+#define tag_8_xor_(tag_blks,cipher_blks)  \
+  do{  \
+	__m512i tag_ = _mm512_xor_epi64(*((__m512i*)cipher_blks), *(((__m512i*)cipher_blks)+1)); \
+	__m256i tag__  = _mm256_xor_si256(*((__m256i*)&tag_), *(((__m256i*)&tag_)+1)); \
+	tag_blks[2] =_mm_xor_si128(tag_blks[2], _mm_xor_si128(*((__m128i*)&tag__), *(((__m128i*)&tag__)+1))); \
+  } while(0)
+
+#define enc_8_(cipher_blks, key)                                   \
+	do{                                                            \
+		__m512i dkey = _mm512_broadcast_i32x4(key);		     	   \
+		*((__m512i*)cipher_blks)     = _mm512_aesenc_epi128(*((__m512i*)cipher_blks)    , dkey);   \
+		*(((__m512i*)cipher_blks)+1) = _mm512_aesenc_epi128(*(((__m512i*)cipher_blks)+1), dkey);   \
+  	}while(0)
+
+#define enc_4_(cipher_blks, key)                                 \
+	do{                                                         \
+		*((__m512i*)cipher_blks)     = _mm512_aesenc_epi128(*((__m512i*)cipher_blks)    , _mm512_broadcast_i32x4(key));   \
+  	}while(0)
 
 #define AES_ECB_8_(cipher_blks, sched, sign_keys)  \
 	do{                                        	   \

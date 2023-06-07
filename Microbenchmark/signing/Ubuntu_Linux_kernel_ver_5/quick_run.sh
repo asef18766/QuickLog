@@ -25,3 +25,13 @@ sudo dmesg --clear
 sudo insmod quick512.ko  len=384
 sudo dmesg
 sudo rmmod quick512
+
+sudo dmesg --clear
+sudo insmod quick512.ko  len=600
+sudo dmesg
+sudo rmmod quick512
+
+sudo dmesg --clear
+sudo insmod quick512.ko  len=1024
+sudo dmesg
+sudo rmmod quick512
